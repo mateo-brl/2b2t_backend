@@ -13,7 +13,7 @@ import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
 import io.ktor.server.routing.routing
-import io.ktor.http.HttpStatusCode
+import io.ktor.server.sse.SSE
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 
@@ -25,11 +25,12 @@ fun main() {
     val jdbcUrl = System.getenv("JDBC_URL") ?: DatabaseFactory.defaultJdbcUrl()
     DatabaseFactory.init(jdbcUrl)
     rootLog.info("Database initialised at {}", jdbcUrl)
-    val repo = BotEventRepository()
-    embeddedServer(Netty, port = port, host = host) { module(repo) }.start(wait = true)
+    val broadcaster = EventBroadcaster()
+    val repo = BotEventRepository(broadcaster)
+    embeddedServer(Netty, port = port, host = host) { module(repo, broadcaster) }.start(wait = true)
 }
 
-fun Application.module(repo: BotEventRepository) {
+fun Application.module(repo: BotEventRepository, broadcaster: EventBroadcaster) {
     install(ContentNegotiation) {
         json(Json {
             prettyPrint = false
@@ -48,16 +49,19 @@ fun Application.module(repo: BotEventRepository) {
         allowMethod(HttpMethod.Options)
         allowHeader(HttpHeaders.ContentType)
         allowHeader(HttpHeaders.Accept)
+        allowHeader(HttpHeaders.CacheControl)
     }
+    install(SSE)
     install(CallLogging)
     install(StatusPages) {
         exception<Throwable> { call, cause ->
             rootLog.error("Unhandled error", cause)
-            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (cause.message ?: "internal")))
+            call.respond(io.ktor.http.HttpStatusCode.InternalServerError, mapOf("error" to (cause.message ?: "internal")))
         }
     }
     routing {
         healthRoutes(repo)
         ingestRoutes(repo)
+        sseRoutes(broadcaster)
     }
 }

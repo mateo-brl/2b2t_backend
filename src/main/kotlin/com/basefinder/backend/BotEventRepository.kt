@@ -21,8 +21,11 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Uses {@code INSERT OR IGNORE} (via Exposed {@code insertIgnore}) for
  * race-safe dedupe at the DB layer.
+ *
+ * On a successful INSERT, the event is also published to the optional
+ * {@link EventBroadcaster} so SSE subscribers see it live.
  */
-class BotEventRepository {
+class BotEventRepository(private val broadcaster: EventBroadcaster? = null) {
 
     private val totalReceived = AtomicLong(0)
     private val parser = Json { ignoreUnknownKeys = true }
@@ -51,7 +54,11 @@ class BotEventRepository {
                 it[receivedAt] = now
             }.insertedCount
         }
-        return if (rowId > 0) InsertOutcome.INSERTED else InsertOutcome.DUPLICATE
+        val outcome = if (rowId > 0) InsertOutcome.INSERTED else InsertOutcome.DUPLICATE
+        if (outcome == InsertOutcome.INSERTED) {
+            broadcaster?.publish(event)
+        }
+        return outcome
     }
 
     fun recent(limit: Int): List<JsonObject> = transaction {
