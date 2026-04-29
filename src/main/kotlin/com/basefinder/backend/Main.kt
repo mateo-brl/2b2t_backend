@@ -19,10 +19,14 @@ private val rootLog = LoggerFactory.getLogger("Application")
 fun main() {
     val port = System.getenv("PORT")?.toIntOrNull() ?: 8080
     val host = System.getenv("HOST") ?: "127.0.0.1"
-    embeddedServer(Netty, port = port, host = host, module = Application::module).start(wait = true)
+    val jdbcUrl = System.getenv("JDBC_URL") ?: DatabaseFactory.defaultJdbcUrl()
+    DatabaseFactory.init(jdbcUrl)
+    rootLog.info("Database initialised at {}", jdbcUrl)
+    val repo = BotEventRepository()
+    embeddedServer(Netty, port = port, host = host) { module(repo) }.start(wait = true)
 }
 
-fun Application.module() {
+fun Application.module(repo: BotEventRepository) {
     install(ContentNegotiation) {
         json(Json {
             prettyPrint = false
@@ -37,7 +41,7 @@ fun Application.module() {
         }
     }
     routing {
-        healthRoutes()
-        ingestRoutes(EventStore.shared)
+        healthRoutes(repo)
+        ingestRoutes(repo)
     }
 }

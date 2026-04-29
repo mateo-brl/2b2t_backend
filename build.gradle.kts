@@ -21,6 +21,12 @@ dependencies {
     implementation("io.ktor:ktor-server-call-logging:3.0.1")
     implementation("ch.qos.logback:logback-classic:1.5.12")
 
+    // Persistence: Exposed ORM + SQLite for MVP. Postgres dialect once a VPS is up.
+    implementation("org.jetbrains.exposed:exposed-core:0.56.0")
+    implementation("org.jetbrains.exposed:exposed-jdbc:0.56.0")
+    implementation("org.xerial:sqlite-jdbc:3.47.1.0")
+    implementation("com.zaxxer:HikariCP:6.2.1")
+
     testImplementation(kotlin("test"))
     testImplementation("io.ktor:ktor-server-test-host:3.0.1")
 }

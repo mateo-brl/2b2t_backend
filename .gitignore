@@ -4,3 +4,6 @@ build/
 *.iml
 out/
 .kotlin/
+data/
+*.db
+*.db-journal

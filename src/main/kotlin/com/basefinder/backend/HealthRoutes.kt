@@ -10,17 +10,17 @@ data class HealthResponse(
     val status: String,
     val version: String,
     val eventsReceived: Long,
-    val eventsStored: Int
+    val eventsStored: Long
 )
 
-fun Route.healthRoutes() {
+fun Route.healthRoutes(repo: BotEventRepository) {
     get("/v1/health") {
         call.respond(
             HealthResponse(
                 status = "ok",
-                version = "0.1.0",
-                eventsReceived = EventStore.shared.totalReceived(),
-                eventsStored = EventStore.shared.stored()
+                version = "0.2.0",
+                eventsReceived = repo.totalReceived(),
+                eventsStored = repo.count()
             )
         )
     }
