@@ -19,6 +19,7 @@ dependencies {
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.1")
     implementation("io.ktor:ktor-server-status-pages:3.0.1")
     implementation("io.ktor:ktor-server-call-logging:3.0.1")
+    implementation("io.ktor:ktor-server-cors:3.0.1")
     implementation("ch.qos.logback:logback-classic:1.5.12")
 
     // Persistence: Exposed ORM + SQLite for MVP. Postgres dialect once a VPS is up.

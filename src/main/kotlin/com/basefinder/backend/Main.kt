@@ -5,8 +5,11 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
 import io.ktor.server.routing.routing
@@ -32,6 +35,19 @@ fun Application.module(repo: BotEventRepository) {
             prettyPrint = false
             ignoreUnknownKeys = true
         })
+    }
+    install(CORS) {
+        // Dev: Vite default ports. Will be replaced by an allowlist of
+        // production origins (and Discord OAuth callback) in Phase 4.
+        allowHost("localhost:5173")
+        allowHost("127.0.0.1:5173")
+        allowHost("localhost:4173") // vite preview
+        allowHost("127.0.0.1:4173")
+        allowMethod(HttpMethod.Get)
+        allowMethod(HttpMethod.Post)
+        allowMethod(HttpMethod.Options)
+        allowHeader(HttpHeaders.ContentType)
+        allowHeader(HttpHeaders.Accept)
     }
     install(CallLogging)
     install(StatusPages) {
