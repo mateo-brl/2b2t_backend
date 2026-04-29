@@ -62,6 +62,7 @@ fun Application.module(repo: BotEventRepository, broadcaster: EventBroadcaster) 
     routing {
         healthRoutes(repo)
         ingestRoutes(repo)
+        basesRoutes(repo)
         sseRoutes(broadcaster)
     }
 }

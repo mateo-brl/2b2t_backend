@@ -3,11 +3,13 @@ package com.basefinder.backend
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.long
 import kotlinx.serialization.json.longOrNull
 import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insertIgnore
+import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.concurrent.atomic.AtomicLong
@@ -74,6 +76,35 @@ class BotEventRepository(private val broadcaster: EventBroadcaster? = null) {
 
     fun count(): Long = transaction {
         BotEventsTable.selectAll().count()
+    }
+
+    /**
+     * Bases detected, optionally filtered by dimension and minimum score.
+     * Returns the raw event payloads (the dashboard parses chunk_x/score/etc).
+     * Newest first (DESC by id), capped by [limit].
+     */
+    fun bases(dimension: String?, minScore: Double?, limit: Int): List<JsonObject> = transaction {
+        val q = BotEventsTable
+            .selectAll()
+            .where { BotEventsTable.type eq "base_found" }
+            .orderBy(BotEventsTable.id, SortOrder.DESC)
+            .limit(limit * 4) // over-fetch then filter in app code (SQLite has no JSON ops)
+
+        val out = ArrayList<JsonObject>(limit)
+        for (row in q) {
+            val obj = parser.parseToJsonElement(row[BotEventsTable.payload]) as JsonObject
+            if (dimension != null) {
+                val dim = obj["dimension"]?.jsonPrimitive?.contentOrNull
+                if (dim != dimension) continue
+            }
+            if (minScore != null) {
+                val score = obj["score"]?.jsonPrimitive?.doubleOrNull
+                if (score == null || score < minScore) continue
+            }
+            out.add(obj)
+            if (out.size >= limit) break
+        }
+        out
     }
 
     fun totalReceived(): Long = totalReceived.get()
