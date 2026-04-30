@@ -31,8 +31,8 @@ fun Route.basesRoutes(repo: BotEventRepository) {
      * Le format historique est {@code <dim>:<chunkX>:<chunkZ>:<baseType>}
      * — voir {@code BaseFound.idempotencyKey()} côté bot.
      */
-    delete("/v1/bases/{key...}") {
-        val key = call.parameters.getAll("key")?.joinToString("/") ?: ""
+    delete("/v1/bases/{key}") {
+        val key = call.parameters["key"] ?: ""
         if (key.isBlank()) {
             call.respond(HttpStatusCode.BadRequest, mapOf("error" to "missing key"))
             return@delete

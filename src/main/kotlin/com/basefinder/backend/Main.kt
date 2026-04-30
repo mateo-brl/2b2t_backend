@@ -16,6 +16,8 @@ import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
+import java.nio.file.Files
+import java.nio.file.Path
 
 private val rootLog = LoggerFactory.getLogger("Application")
 
@@ -23,14 +25,19 @@ fun main() {
     val port = System.getenv("PORT")?.toIntOrNull() ?: 8080
     val host = System.getenv("HOST") ?: "127.0.0.1"
     val jdbcUrl = System.getenv("JDBC_URL") ?: DatabaseFactory.defaultJdbcUrl()
+    val storageRoot = Path.of(System.getenv("SCREENSHOT_DIR") ?: "data/screenshots")
+    Files.createDirectories(storageRoot)
     DatabaseFactory.init(jdbcUrl)
     rootLog.info("Database initialised at {}", jdbcUrl)
+    rootLog.info("Screenshot storage at {}", storageRoot.toAbsolutePath())
     val broadcaster = EventBroadcaster()
     val repo = BotEventRepository(broadcaster)
     val zoneRepo = SearchZoneRepository()
     val commandRepo = BotCommandRepository()
+    val screenshotRepo = BaseScreenshotRepository()
+    val reviewRepo = BaseReviewRepository()
     embeddedServer(Netty, port = port, host = host) {
-        module(repo, broadcaster, zoneRepo, commandRepo)
+        module(repo, broadcaster, zoneRepo, commandRepo, screenshotRepo, reviewRepo, storageRoot)
     }.start(wait = true)
 }
 
@@ -39,6 +46,9 @@ fun Application.module(
     broadcaster: EventBroadcaster,
     zoneRepo: SearchZoneRepository = SearchZoneRepository(),
     commandRepo: BotCommandRepository = BotCommandRepository(),
+    screenshotRepo: BaseScreenshotRepository = BaseScreenshotRepository(),
+    reviewRepo: BaseReviewRepository = BaseReviewRepository(),
+    screenshotStorageRoot: Path = Path.of("data/screenshots"),
 ) {
     install(ContentNegotiation) {
         json(Json {
@@ -77,6 +87,8 @@ fun Application.module(
         coverageRoutes(repo)
         zonesRoutes(zoneRepo)
         commandsRoutes(commandRepo)
+        screenshotsRoutes(screenshotRepo, screenshotStorageRoot)
+        reviewsRoutes(reviewRepo)
         sseRoutes(broadcaster)
     }
 }
