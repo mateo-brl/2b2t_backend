@@ -28,13 +28,17 @@ fun main() {
     val broadcaster = EventBroadcaster()
     val repo = BotEventRepository(broadcaster)
     val zoneRepo = SearchZoneRepository()
-    embeddedServer(Netty, port = port, host = host) { module(repo, broadcaster, zoneRepo) }.start(wait = true)
+    val commandRepo = BotCommandRepository()
+    embeddedServer(Netty, port = port, host = host) {
+        module(repo, broadcaster, zoneRepo, commandRepo)
+    }.start(wait = true)
 }
 
 fun Application.module(
     repo: BotEventRepository,
     broadcaster: EventBroadcaster,
     zoneRepo: SearchZoneRepository = SearchZoneRepository(),
+    commandRepo: BotCommandRepository = BotCommandRepository(),
 ) {
     install(ContentNegotiation) {
         json(Json {
@@ -72,6 +76,7 @@ fun Application.module(
         basesRoutes(repo)
         coverageRoutes(repo)
         zonesRoutes(zoneRepo)
+        commandsRoutes(commandRepo)
         sseRoutes(broadcaster)
     }
 }
