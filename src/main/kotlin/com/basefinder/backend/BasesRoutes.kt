@@ -7,6 +7,10 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import org.slf4j.LoggerFactory
+import java.io.File
+
+private val basesLog = LoggerFactory.getLogger("BasesRoutes")
 
 @Serializable
 data class BasesResponse(val total: Int, val bases: List<JsonObject>)
@@ -17,7 +21,11 @@ data class BasesResponse(val total: Int, val bases: List<JsonObject>)
  * mount and listens to /v1/events/stream for live updates (it picks
  * out the {@code base_found} type itself).
  */
-fun Route.basesRoutes(repo: BotEventRepository) {
+fun Route.basesRoutes(
+    repo: BotEventRepository,
+    screenshotRepo: BaseScreenshotRepository = BaseScreenshotRepository(),
+    reviewRepo: BaseReviewRepository = BaseReviewRepository(),
+) {
     get("/v1/bases") {
         val dim = call.request.queryParameters["dim"]
         val minScore = call.request.queryParameters["min_score"]?.toDoubleOrNull()
@@ -28,8 +36,14 @@ fun Route.basesRoutes(repo: BotEventRepository) {
 
     /**
      * Supprime une base par sa clé d'idempotence (encodée dans l'URL).
-     * Le format historique est {@code <dim>:<chunkX>:<chunkZ>:<baseType>}
-     * — voir {@code BaseFound.idempotencyKey()} côté bot.
+     * Cascade : on supprime aussi les screenshots associées (rows + fichiers
+     * sur disque) et la review row éventuelle. Sans le cascade,
+     * d'anciennes screenshots et reviews orphelines pollueraient les
+     * panels du dashboard et ne pourraient plus être nettoyées via l'UI.
+     *
+     * Idempotent : si la base n'existe que via screenshots/review (cas
+     * "orphan" déjà nettoyé côté events), on cascade quand même les
+     * artefacts restants et on répond 204.
      */
     delete("/v1/bases/{key}") {
         val key = call.parameters["key"] ?: ""
@@ -37,7 +51,37 @@ fun Route.basesRoutes(repo: BotEventRepository) {
             call.respond(HttpStatusCode.BadRequest, mapOf("error" to "missing key"))
             return@delete
         }
-        if (repo.deleteByKey(key)) call.respond(HttpStatusCode.NoContent)
-        else call.respond(HttpStatusCode.NotFound)
+
+        // Cascade screenshots (files on disk + rows)
+        val shots = screenshotRepo.listForBase(key)
+        for (s in shots) {
+            try {
+                File(s.filePath).delete()
+            } catch (e: Throwable) {
+                basesLog.warn("Failed to delete screenshot file {}: {}", s.filePath, e.message)
+            }
+            screenshotRepo.delete(s.id)
+        }
+        // Try to drop the (likely empty) per-base directory too.
+        if (shots.isNotEmpty()) {
+            val parent = File(shots.first().filePath).parentFile
+            if (parent?.isDirectory == true && (parent.list()?.isEmpty() == true)) {
+                parent.delete()
+            }
+        }
+
+        // Cascade review
+        reviewRepo.delete(key)
+
+        // Drop the event row itself
+        val deletedEvent = repo.deleteByKey(key)
+
+        if (deletedEvent || shots.isNotEmpty()) {
+            basesLog.info("Cascade-deleted {} (event={}, screenshots={})",
+                key, deletedEvent, shots.size)
+            call.respond(HttpStatusCode.NoContent)
+        } else {
+            call.respond(HttpStatusCode.NotFound)
+        }
     }
 }

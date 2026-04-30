@@ -83,7 +83,7 @@ fun Application.module(
     routing {
         healthRoutes(repo)
         ingestRoutes(repo)
-        basesRoutes(repo)
+        basesRoutes(repo, screenshotRepo, reviewRepo)
         coverageRoutes(repo)
         zonesRoutes(zoneRepo)
         commandsRoutes(commandRepo)
