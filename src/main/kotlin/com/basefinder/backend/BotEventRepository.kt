@@ -4,10 +4,13 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.batchInsert
+import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
@@ -58,9 +61,101 @@ class BotEventRepository(private val broadcaster: EventBroadcaster? = null) {
         }
         val outcome = if (rowId > 0) InsertOutcome.INSERTED else InsertOutcome.DUPLICATE
         if (outcome == InsertOutcome.INSERTED) {
+            // Side effect : pour chunks_scanned_batch, on hydrate aussi la table
+            // dédiée scanned_chunks. Idempotent grâce au PK composite.
+            if (type == "chunks_scanned_batch") {
+                hydrateScannedChunks(event, now)
+            }
+            broadcaster?.publish(event)
+        } else if (outcome == InsertOutcome.DUPLICATE && type == "bot_tick") {
+            // Le bot recommence ses idempotency_key (tick:0, tick:1...) à chaque
+            // restart MC, donc les ticks de la nouvelle session entrent en
+            // collision avec ceux de la précédente et seraient sinon avalés
+            // silencieusement. On rebroadcast pour que le dashboard suive
+            // toujours la position live ; les consommateurs dédupent eux-mêmes.
             broadcaster?.publish(event)
         }
         return outcome
+    }
+
+    /**
+     * Décompose un batch chunks_scanned_batch en lignes scanned_chunks.
+     * Les clés sont des longs packed (32 bits x | 32 bits z) — mêmes
+     * conventions que ChunkId.pack côté bot.
+     */
+    private fun hydrateScannedChunks(event: JsonObject, now: Long) {
+        val dim = event["dimension"]?.jsonPrimitive?.contentOrNull ?: return
+        val arr = event["chunks"]?.jsonArray ?: return
+        if (arr.isEmpty()) return
+        transaction {
+            ScannedChunksTable.batchInsert(arr, ignore = true) { el ->
+                val packed = el.jsonPrimitive.longOrNull ?: return@batchInsert
+                val cx = (packed shr 32).toInt()
+                val cz = packed.toInt()
+                this[ScannedChunksTable.dim] = dim
+                this[ScannedChunksTable.chunkX] = cx
+                this[ScannedChunksTable.chunkZ] = cz
+                this[ScannedChunksTable.scannedAt] = now
+            }
+        }
+    }
+
+    data class CoverageCell(val cx: Int, val cz: Int, val count: Int)
+
+    /**
+     * Agrège les chunks scannés en une grille de cellules. La taille de cellule
+     * (en chunks par côté) contrôle le grain : 1 = chunk-level, 64 = ~1 km côté.
+     *
+     * Filtre par bbox (en world blocks) pour ne renvoyer que ce que le viewport
+     * voit — économise du JSON et du rendu.
+     */
+    fun coverage(
+        dim: String,
+        gridChunks: Int,
+        xMinBlocks: Int,
+        xMaxBlocks: Int,
+        zMinBlocks: Int,
+        zMaxBlocks: Int,
+    ): List<CoverageCell> = transaction {
+        val cxMin = xMinBlocks shr 4
+        val cxMax = xMaxBlocks shr 4
+        val czMin = zMinBlocks shr 4
+        val czMax = zMaxBlocks shr 4
+        val agg = HashMap<Long, Int>()
+        for (row in ScannedChunksTable
+            .selectAll()
+            .where {
+                (ScannedChunksTable.dim eq dim)
+                    .and(ScannedChunksTable.chunkX greaterEq cxMin)
+                    .and(ScannedChunksTable.chunkX lessEq cxMax)
+                    .and(ScannedChunksTable.chunkZ greaterEq czMin)
+                    .and(ScannedChunksTable.chunkZ lessEq czMax)
+            }) {
+            val cx = row[ScannedChunksTable.chunkX]
+            val cz = row[ScannedChunksTable.chunkZ]
+            val gx = Math.floorDiv(cx, gridChunks)
+            val gz = Math.floorDiv(cz, gridChunks)
+            val key = (gx.toLong() shl 32) or (gz.toLong() and 0xFFFFFFFFL)
+            agg[key] = (agg[key] ?: 0) + 1
+        }
+        agg.entries.map { (k, v) ->
+            val gx = (k shr 32).toInt()
+            val gz = k.toInt()
+            CoverageCell(gx, gz, v)
+        }
+    }
+
+    fun coverageCount(dim: String): Long = transaction {
+        ScannedChunksTable.selectAll().where { ScannedChunksTable.dim eq dim }.count()
+    }
+
+    /**
+     * Supprime un événement par sa clé d'idempotence. Utilisé par le dashboard
+     * pour retirer un faux-positif depuis le popup d'une base. Renvoie
+     * {@code true} si une ligne a été affectée, {@code false} sinon.
+     */
+    fun deleteByKey(key: String): Boolean = transaction {
+        BotEventsTable.deleteWhere { it.run { BotEventsTable.idempotencyKey eq key } } > 0
     }
 
     fun recent(limit: Int): List<JsonObject> = transaction {

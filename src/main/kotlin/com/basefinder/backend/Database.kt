@@ -27,7 +27,7 @@ object DatabaseFactory {
         val dataSource = HikariDataSource(config)
         Database.connect(dataSource)
         transaction {
-            SchemaUtils.create(BotEventsTable)
+            SchemaUtils.create(BotEventsTable, ScannedChunksTable, SearchZonesTable)
         }
     }
 

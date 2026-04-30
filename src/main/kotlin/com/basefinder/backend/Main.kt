@@ -27,10 +27,15 @@ fun main() {
     rootLog.info("Database initialised at {}", jdbcUrl)
     val broadcaster = EventBroadcaster()
     val repo = BotEventRepository(broadcaster)
-    embeddedServer(Netty, port = port, host = host) { module(repo, broadcaster) }.start(wait = true)
+    val zoneRepo = SearchZoneRepository()
+    embeddedServer(Netty, port = port, host = host) { module(repo, broadcaster, zoneRepo) }.start(wait = true)
 }
 
-fun Application.module(repo: BotEventRepository, broadcaster: EventBroadcaster) {
+fun Application.module(
+    repo: BotEventRepository,
+    broadcaster: EventBroadcaster,
+    zoneRepo: SearchZoneRepository = SearchZoneRepository(),
+) {
     install(ContentNegotiation) {
         json(Json {
             prettyPrint = false
@@ -46,6 +51,8 @@ fun Application.module(repo: BotEventRepository, broadcaster: EventBroadcaster) 
         allowHost("127.0.0.1:4173")
         allowMethod(HttpMethod.Get)
         allowMethod(HttpMethod.Post)
+        allowMethod(HttpMethod.Put)
+        allowMethod(HttpMethod.Delete)
         allowMethod(HttpMethod.Options)
         allowHeader(HttpHeaders.ContentType)
         allowHeader(HttpHeaders.Accept)
@@ -63,6 +70,8 @@ fun Application.module(repo: BotEventRepository, broadcaster: EventBroadcaster) 
         healthRoutes(repo)
         ingestRoutes(repo)
         basesRoutes(repo)
+        coverageRoutes(repo)
+        zonesRoutes(zoneRepo)
         sseRoutes(broadcaster)
     }
 }
